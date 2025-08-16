@@ -6,7 +6,6 @@ const cors = require("cors");
 const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
 const compression = require("compression");
-const path = require("path");
 const connectDB = require("./config/db");
 
 dotenv.config();
@@ -23,13 +22,20 @@ app.use(
   })
 );
 
-const allowedOrigins = (process.env.CORS_ORIGIN || "*").split(",").map(o => o.trim());
+// ✅ Explicitly allow your frontend domain
+const allowedOrigins = [
+  "http://localhost:5173", // Vite dev
+  "https://jazzy-croissant-c32376.netlify.app" // Netlify prod
+];
+
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes("*") || allowedOrigins.includes(origin)) {
+      if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
-      } else callback(new Error("Not allowed by CORS"));
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
     },
     credentials: true,
   })
@@ -43,13 +49,6 @@ app.use(express.urlencoded({ extended: true, limit: "10kb" }));
 // ---------------- Routes ----------------
 app.use("/api/contacts", require("./routes/contactRoutes"));
 app.get("/health", (req, res) => res.json({ status: "UP" }));
-
-// ---------------- Production ----------------
-if (process.env.NODE_ENV === "production") {
-  const frontendPath = path.join(__dirname, "client", "build");
-  app.use(express.static(frontendPath));
-  app.get("*", (req, res) => res.sendFile(path.join(frontendPath, "index.html")));
-}
 
 // ---------------- Error Handling ----------------
 app.use((req, res) => res.status(404).json({ success: false, message: "Route not found" }));
