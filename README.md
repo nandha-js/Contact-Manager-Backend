@@ -1,4 +1,4 @@
-# 📇 Contact Manager Frontend
+# 📇 Contact Manager 
 
 A React-based frontend for managing contacts — built with **Vite**, **React Router**, **Axios**, and **TailwindCSS**.  
 This app connects to the Contact Manager backend API to perform **CRUD** operations (Create, Read, Update, Delete).
