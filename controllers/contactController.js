@@ -4,36 +4,14 @@ const Joi = require("joi");
 const mongoose = require("mongoose");
 
 /**
- * @desc Get all contacts with pagination & search
+ * @desc Get all contacts
  * @route GET /api/contacts
  * @access Public
  */
 const getContacts = async (req, res) => {
   try {
-    const page = Math.max(parseInt(req.query.page) || 1, 1);
-    const limit = Math.max(parseInt(req.query.limit) || 10, 1);
-    const search = req.query.search?.trim() || "";
-
-    const query = search
-      ? { name: { $regex: search, $options: "i" } }
-      : {};
-
-    const [contacts, total] = await Promise.all([
-      Contact.find(query)
-        .sort({ name: 1 })
-        .skip((page - 1) * limit)
-        .limit(limit),
-      Contact.countDocuments(query),
-    ]);
-
-    res.status(200).json({
-      success: true,
-      count: contacts.length,
-      total,
-      page,
-      pages: Math.ceil(total / limit),
-      data: contacts,
-    });
+    const contacts = await Contact.find().sort({ name: 1 });
+    res.status(200).json(contacts); // return array directly
   } catch (error) {
     console.error("Error fetching contacts:", error);
     res.status(500).json({ success: false, message: "Server Error" });
@@ -41,7 +19,7 @@ const getContacts = async (req, res) => {
 };
 
 /**
- * @desc Create new contact
+ * @desc Create a new contact
  * @route POST /api/contacts
  * @access Public
  */
@@ -50,52 +28,75 @@ const createContact = async (req, res) => {
     const schema = Joi.object({
       name: Joi.string().min(2).max(100).required(),
       email: Joi.string().email().required(),
-      phone: Joi.string().pattern(/^[0-9+\-\s()]+$/).min(7).max(15).required(),
+      phone: Joi.string()
+        .pattern(/^[0-9+\-\s()]+$/)
+        .min(7)
+        .max(15)
+        .required(),
     });
 
     const { error } = schema.validate(req.body, { abortEarly: false });
-    if (error)
+    if (error) {
       return res.status(400).json({
         success: false,
         message: "Validation error",
         errors: error.details.map((err) => err.message),
       });
-
-    // Prevent duplicate email or phone
-    const existing = await Contact.findOne({
-      $or: [{ email: req.body.email }, { phone: req.body.phone }],
-    });
-    if (existing) {
-      return res
-        .status(409)
-        .json({ success: false, message: "Contact already exists" });
     }
 
-    const contact = await Contact.create(req.body);
-    res.status(201).json({ success: true, data: contact });
+    // Normalize input
+    const email = req.body.email.trim().toLowerCase();
+    const phone = req.body.phone.trim();
+    const name = req.body.name.trim();
+
+    // Check for duplicate email or phone
+    const existing = await Contact.findOne({
+      $or: [{ email }, { phone }],
+    });
+
+    if (existing) {
+      let conflictField = existing.email === email ? "Email" : "Phone";
+      return res.status(409).json({
+        success: false,
+        message: `${conflictField} already exists`,
+      });
+    }
+
+    const contact = await Contact.create({ name, email, phone });
+    res.status(201).json(contact); // return created contact directly
   } catch (error) {
     console.error("Error creating contact:", error);
+
+    // Handle MongoDB duplicate key error if schema has unique: true
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyValue)[0];
+      return res.status(409).json({
+        success: false,
+        message: `${field} already exists`,
+      });
+    }
+
     res.status(500).json({ success: false, message: "Server Error" });
   }
 };
 
 /**
- * @desc Get single contact by ID
+ * @desc Get a contact by ID
  * @route GET /api/contacts/:id
  * @access Public
  */
 const getContactById = async (req, res) => {
   try {
-    if (!mongoose.Types.ObjectId.isValid(req.params.id))
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ success: false, message: "Invalid ID" });
+    }
 
     const contact = await Contact.findById(req.params.id);
-    if (!contact)
-      return res
-        .status(404)
-        .json({ success: false, message: "Contact not found" });
+    if (!contact) {
+      return res.status(404).json({ success: false, message: "Contact not found" });
+    }
 
-    res.status(200).json({ success: true, data: contact });
+    res.status(200).json(contact);
   } catch (error) {
     console.error("Error fetching contact:", error);
     res.status(500).json({ success: false, message: "Server Error" });
@@ -103,14 +104,15 @@ const getContactById = async (req, res) => {
 };
 
 /**
- * @desc Update contact
+ * @desc Update a contact
  * @route PUT /api/contacts/:id
  * @access Public
  */
 const updateContact = async (req, res) => {
   try {
-    if (!mongoose.Types.ObjectId.isValid(req.params.id))
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ success: false, message: "Invalid ID" });
+    }
 
     const schema = Joi.object({
       name: Joi.string().min(2).max(100),
@@ -119,25 +121,46 @@ const updateContact = async (req, res) => {
     });
 
     const { error } = schema.validate(req.body, { abortEarly: false });
-    if (error)
+    if (error) {
       return res.status(400).json({
         success: false,
         message: "Validation error",
         errors: error.details.map((err) => err.message),
       });
+    }
+
+    const updates = { ...req.body };
+    if (updates.email) updates.email = updates.email.trim().toLowerCase();
+    if (updates.phone) updates.phone = updates.phone.trim();
+    if (updates.name) updates.name = updates.name.trim();
+
+    // Check duplicate email/phone excluding current contact
+    if (updates.email || updates.phone) {
+      const existing = await Contact.findOne({
+        $or: [{ email: updates.email }, { phone: updates.phone }],
+        _id: { $ne: req.params.id },
+      });
+
+      if (existing) {
+        let conflictField = existing.email === updates.email ? "Email" : "Phone";
+        return res.status(409).json({
+          success: false,
+          message: `${conflictField} already in use`,
+        });
+      }
+    }
 
     const updatedContact = await Contact.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      updates,
       { new: true, runValidators: true }
     );
 
-    if (!updatedContact)
-      return res
-        .status(404)
-        .json({ success: false, message: "Contact not found" });
+    if (!updatedContact) {
+      return res.status(404).json({ success: false, message: "Contact not found" });
+    }
 
-    res.status(200).json({ success: true, data: updatedContact });
+    res.status(200).json(updatedContact);
   } catch (error) {
     console.error("Error updating contact:", error);
     res.status(500).json({ success: false, message: "Server Error" });
@@ -145,25 +168,23 @@ const updateContact = async (req, res) => {
 };
 
 /**
- * @desc Delete contact
+ * @desc Delete a contact
  * @route DELETE /api/contacts/:id
  * @access Public
  */
 const deleteContact = async (req, res) => {
   try {
-    if (!mongoose.Types.ObjectId.isValid(req.params.id))
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ success: false, message: "Invalid ID" });
+    }
 
     const contact = await Contact.findById(req.params.id);
-    if (!contact)
-      return res
-        .status(404)
-        .json({ success: false, message: "Contact not found" });
+    if (!contact) {
+      return res.status(404).json({ success: false, message: "Contact not found" });
+    }
 
     await contact.deleteOne();
-    res
-      .status(200)
-      .json({ success: true, message: "Contact deleted successfully" });
+    res.status(200).json({ success: true, message: "Contact deleted successfully" });
   } catch (error) {
     console.error("Error deleting contact:", error);
     res.status(500).json({ success: false, message: "Server Error" });

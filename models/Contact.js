@@ -1,51 +1,32 @@
-// models/Contact.js
 const mongoose = require("mongoose");
-
-const emailRegex = /^[\w.-]+@([\w-]+\.)+[\w-]{2,4}$/;
-const phoneRegex = /^[0-9]{10}$/; // Adjust for +91, +1, etc.
 
 const contactSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: [true, "Please add the contact's name"],
+      required: [true, "Name is required"],
       trim: true,
-      minlength: [2, "Name must be at least 2 characters"],
+      minlength: [2, "Name must be at least 2 characters long"],
       maxlength: [100, "Name must be less than 100 characters"],
-      index: true, // this is fine to keep for faster searches
     },
     email: {
       type: String,
-      required: [true, "Please add the contact's email"],
+      required: [true, "Email is required"],
+      unique: true,
       lowercase: true,
-      trim: true,
-      match: [emailRegex, "Please enter a valid email address"],
-      // removed `unique` and `index` to avoid duplicate index warning
+      match: [/\S+@\S+\.\S+/, "Please enter a valid email"],
     },
     phone: {
       type: String,
-      required: [true, "Please add the contact's phone number"],
-      trim: true,
-      match: [phoneRegex, "Please enter a valid 10-digit phone number"],
+      required: [true, "Phone number is required"],
+      unique: true,
+      match: [
+        /^[0-9+\-\s()]{7,15}$/, // ✅ allows 7–15 digits, spaces, +, -, ()
+        "Please enter a valid phone number (7–15 digits)",
+      ],
     },
   },
-  {
-    timestamps: true,
-    toJSON: { virtuals: true },
-    toObject: { virtuals: true },
-    collation: { locale: "en", strength: 2 }, // case-insensitive checks
-  }
-);
-
-// Virtual: "Name <email>"
-contactSchema.virtual("fullInfo").get(function () {
-  return `${this.name} <${this.email}>`;
-});
-
-// Case-insensitive unique email index
-contactSchema.index(
-  { email: 1 },
-  { unique: true, collation: { locale: "en", strength: 2 } }
+  { timestamps: true }
 );
 
 module.exports = mongoose.model("Contact", contactSchema);
